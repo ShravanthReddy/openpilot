@@ -59,6 +59,7 @@ class SpeedLimitAssist:
     self.frame = -1
     self.long_engaged_timer = 0
     self.pre_active_timer = 0
+    self.invalid_limit_frames = 0
     self.is_metric = self.params.get_bool("IsMetric")
     set_speed_limit_assist_availability(self.CP, self.CP_SP, self.params)
     self.enabled = self.params.get("SpeedLimitMode", return_default=True) == Mode.assist
@@ -125,8 +126,14 @@ class SpeedLimitAssist:
     else:
       events_sp.add(EventNameSP.speedLimitActive)
 
+  @property
+  def limit_usable(self) -> bool:
+    # a "valid" flag with a stale/zeroed value must not be steered toward: the
+    # resolver can report last-valid while the held value has already collapsed
+    return self._has_speed_limit and self._speed_limit_final_last > LIMIT_MIN_SPEED
+
   def get_v_target_from_control(self) -> float:
-    if self._has_speed_limit:
+    if self.limit_usable:
       if self.pcm_op_long and self.is_enabled:
         return self._speed_limit_final_last
       if not self.pcm_op_long and self.is_active:
@@ -204,6 +211,9 @@ class SpeedLimitAssist:
     return self.a_ego
 
   def get_adapting_state_target_acceleration(self) -> float:
+    if not self.limit_usable:
+      return self.get_current_acceleration_as_target()
+
     if self._distance > 0:
       target = (self._speed_limit_final_last ** 2 - self.v_ego ** 2) / (2. * self._distance)
     else:
@@ -212,6 +222,9 @@ class SpeedLimitAssist:
     return float(min(max(target, LIMIT_MIN_ACC), LIMIT_MAX_ACC))
 
   def get_active_state_target_acceleration(self) -> float:
+    if not self.limit_usable:
+      return self.get_current_acceleration_as_target()
+
     target = self.v_offset / float(ModelConstants.T_IDXS[CONTROL_N])
     return float(min(max(target, LIMIT_MIN_ACC), LIMIT_MAX_ACC))
 
@@ -245,6 +258,12 @@ class SpeedLimitAssist:
         self.state = SpeedLimitAssistState.disabled
 
       else:
+        # release control if the limit reading has been unusable for ~1s: steering
+        # toward a stale or zeroed limit value causes phantom braking
+        if self.invalid_limit_frames > int(1.0 / DT_MDL) and \
+           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending):
+          self.state = SpeedLimitAssistState.inactive
+
         # ACTIVE
         if self.state == SpeedLimitAssistState.active:
           if self.v_cruise_cluster_changed:
@@ -316,6 +335,12 @@ class SpeedLimitAssist:
         self.state = SpeedLimitAssistState.disabled
 
       else:
+        # release control if the limit reading has been unusable for ~1s: steering
+        # toward a stale or zeroed limit value causes phantom braking
+        if self.invalid_limit_frames > int(1.0 / DT_MDL) and \
+           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending):
+          self.state = SpeedLimitAssistState.inactive
+
         # ACTIVE
         if self.state == SpeedLimitAssistState.active:
           if self.v_cruise_cluster_changed:
@@ -391,6 +416,7 @@ class SpeedLimitAssist:
     self._speed_limit = speed_limit
     self._speed_limit_final_last = speed_limit_final_last
     self._distance = distance
+    self.invalid_limit_frames = 0 if self.limit_usable else self.invalid_limit_frames + 1
 
     self.update_params()
     self.update_calculations(v_cruise_cluster)
