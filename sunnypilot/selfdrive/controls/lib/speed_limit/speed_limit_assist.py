@@ -205,12 +205,15 @@ class SpeedLimitAssist:
 
   def get_adapting_state_target_acceleration(self) -> float:
     if self._distance > 0:
-      return (self._speed_limit_final_last ** 2 - self.v_ego ** 2) / (2. * self._distance)
+      target = (self._speed_limit_final_last ** 2 - self.v_ego ** 2) / (2. * self._distance)
+    else:
+      target = self.v_offset / float(ModelConstants.T_IDXS[CONTROL_N])
 
-    return self.v_offset / float(ModelConstants.T_IDXS[CONTROL_N])
+    return float(min(max(target, LIMIT_MIN_ACC), LIMIT_MAX_ACC))
 
   def get_active_state_target_acceleration(self) -> float:
-    return self.v_offset / float(ModelConstants.T_IDXS[CONTROL_N])
+    target = self.v_offset / float(ModelConstants.T_IDXS[CONTROL_N])
+    return float(min(max(target, LIMIT_MIN_ACC), LIMIT_MAX_ACC))
 
   def _update_confirmed_state(self):
     if self._has_speed_limit:
