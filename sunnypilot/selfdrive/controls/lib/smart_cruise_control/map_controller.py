@@ -214,7 +214,10 @@ class SmartCruiseControlMap:
       else:
         # ENABLED
         if self.state == MapState.enabled:
-          if self.v_cruise > self.v_target != 0:
+          # only take control at highway speeds: map curvature data anticipates
+          # ramps/curves vision can't see yet, but below ~45mph its intersection
+          # geometry artifacts cause phantom slowdowns (log-verified on this car)
+          if self.v_ego > 20.0 and self.v_cruise > self.v_target != 0:
             self.state = MapState.turning
 
         # TURNING
