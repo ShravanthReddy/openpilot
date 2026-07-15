@@ -17,7 +17,13 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
 
-A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
+# Raised low/mid-speed launch accel from stock [1.6, 1.2, 0.8, ...]: log evidence
+# (route 00000005, 08:54-09:01) shows standstill launches behind a departing lead
+# capped ~1.4 m/s^2 let the gap grow 6m -> ~75m in 16s, while the driver's own
+# 2.1 m/s^2 launch held it at 8-9m. 1.9 keeps margin under the Bosch command
+# ceiling and gas-table end (2.0); MPC following distance and jerk costs still
+# bound behavior. Taper to stock above 55 mph.
+A_CRUISE_MAX_VALS = [1.9, 1.5, 0.9, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 ALLOW_THROTTLE_THRESHOLD = 0.4
