@@ -65,7 +65,11 @@ def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
   elif personality==log.LongitudinalPersonality.standard:
     return 1.0
   elif personality==log.LongitudinalPersonality.aggressive:
-    return 0.5
+    # "close but calm": keep aggressive's 1.25s follow gap but standard's jerk
+    # penalty. Stock 0.5 let stopping-lead decel spike -0.35 -> -2.9 in ~2s
+    # (log-verified stabs at 18-27m gap) and caused busy micro-braking while
+    # following. Gap behavior is t_follow's job, not jerk's.
+    return 1.0
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
