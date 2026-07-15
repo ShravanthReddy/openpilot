@@ -19,8 +19,8 @@ VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.VisionState
 ACTIVE_STATES = (VisionState.entering, VisionState.turning, VisionState.leaving)
 ENABLED_STATES = (VisionState.enabled, VisionState.overriding, *ACTIVE_STATES)
 
-_ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to trigger entering turn state.
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.1  # Predicted Lat Acc threshold to abort entering state if speed drops.
+_ENTERING_PRED_LAT_ACC_TH = 1.5  # Predicted Lat Acc threshold to trigger entering turn state.
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to abort entering state if speed drops.
 
 _TURNING_LAT_ACC_TH = 1.6  # Lat Acc threshold to trigger turning state.
 
@@ -32,7 +32,7 @@ _FINISH_LAT_ACC_TH = 1.1  # Lat Acc threshold to trigger the end of the turn cyc
 # keep a comfort margin; at highway speeds allow more cornering so gentle sweeps
 # shed only a few mph instead of dropping far below the flow of traffic.
 _A_LAT_REG_BP = [11.2, 24.6]  # m/s (25, 55 mph)
-_A_LAT_REG_V = [1.8, 2.15]
+_A_LAT_REG_V = [1.9, 2.25]
 
 _NO_OVERSHOOT_TIME_HORIZON = 4.  # s. Time to use for velocity desired based on a_target when not overshooting.
 
@@ -44,7 +44,7 @@ _ENTERING_SMOOTH_DECEL_BP = [1.3, 3.]  # absolute value of lat acc ahead
 # Lookup table for the acceleration for the TURNING state
 # depending on the current lateral acceleration of the vehicle.
 _TURNING_ACC_V = [0.5, 0., -0.4]  # acc value
-_TURNING_ACC_BP = [1.3, 1.9, 2.6]  # absolute value of current lat acc; shifted down to start
+_TURNING_ACC_BP = [1.4, 2.05, 2.7]  # absolute value of current lat acc; shifted down to start
                                    # trimming speed before the EPS torque ceiling (~2.4) is reached
 
 _LEAVING_ACC = 0.5  # Conformable acceleration to regain speed while leaving a turn.
