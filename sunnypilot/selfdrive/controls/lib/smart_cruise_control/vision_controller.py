@@ -27,9 +27,12 @@ _TURNING_LAT_ACC_TH = 1.6  # Lat Acc threshold to trigger turning state.
 _LEAVING_LAT_ACC_TH = 1.3  # Lat Acc threshold to trigger leaving turn state.
 _FINISH_LAT_ACC_TH = 1.1  # Lat Acc threshold to trigger the end of the turn cycle.
 
-_A_LAT_REG_MAX = 1.8  # Maximum lateral acceleration; Honda EPS torque delivers ~2.4 m/s^2 max
-                      # (measured live on Accord 11G), so regulate below it with margin for
-                      # crown/wind so steering never saturates mid-turn
+# Speed-aware regulated lateral acceleration. Honda EPS torque delivers ~2.4 m/s^2
+# max (measured live on Accord 11G), so always regulate below it. At city speeds
+# keep a comfort margin; at highway speeds allow more cornering so gentle sweeps
+# shed only a few mph instead of dropping far below the flow of traffic.
+_A_LAT_REG_BP = [11.2, 24.6]  # m/s (25, 55 mph)
+_A_LAT_REG_V = [1.8, 2.15]
 
 _NO_OVERSHOOT_TIME_HORIZON = 4.  # s. Time to use for velocity desired based on a_target when not overshooting.
 
@@ -100,7 +103,8 @@ class SmartCruiseControlVision:
       max_curve = self.max_pred_lat_acc / (v_ego**2)
 
       # Get the target velocity for the maximum curve
-      self.v_target = (_A_LAT_REG_MAX / max_curve) ** 0.5
+      a_lat_reg = np.interp(v_ego, _A_LAT_REG_BP, _A_LAT_REG_V)
+      self.v_target = (a_lat_reg / max_curve) ** 0.5
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, ENTERING, TURNING, LEAVING, OVERRIDING
