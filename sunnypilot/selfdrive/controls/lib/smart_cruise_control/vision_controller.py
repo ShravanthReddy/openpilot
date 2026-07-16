@@ -19,8 +19,8 @@ VisionState = custom.LongitudinalPlanSP.SmartCruiseControl.VisionState
 ACTIVE_STATES = (VisionState.entering, VisionState.turning, VisionState.leaving)
 ENABLED_STATES = (VisionState.enabled, VisionState.overriding, *ACTIVE_STATES)
 
-_ENTERING_PRED_LAT_ACC_TH = 1.5  # Predicted Lat Acc threshold to trigger entering turn state.
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to abort entering state if speed drops.
+_ENTERING_PRED_LAT_ACC_TH = 1.35  # Predicted Lat Acc threshold to trigger entering turn state.
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.15  # Predicted Lat Acc threshold to abort entering state if speed drops.
 
 _TURNING_LAT_ACC_TH = 1.6  # Lat Acc threshold to trigger turning state.
 
