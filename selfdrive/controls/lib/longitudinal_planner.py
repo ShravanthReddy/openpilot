@@ -33,6 +33,15 @@ MIN_ALLOW_THROTTLE_SPEED = 2.5
 _A_TOTAL_MAX_V = [1.7, 3.2]
 _A_TOTAL_MAX_BP = [20., 40.]
 
+# Model-authored (blended/e2e) decel arrives as raw model output, bypassing the
+# MPC's jerk costs - light stops land as a single hard bite (log-verified -0.3
+# -> -3.2 in one step). Shape the onset: downward changes ramp at this jerk;
+# demands at/below the passthrough apply instantly so emergency-severity
+# braking is never delayed. Releases are instant here (upward transitions are
+# already jerk-limited in the car controller).
+E2E_DOWN_JERK = 2.0  # m/s^3
+E2E_BRAKE_PASSTHROUGH = -3.4  # m/s^2
+
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
 
@@ -66,6 +75,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.prev_accel_clip = [ACCEL_MIN, ACCEL_MAX]
     self.output_a_target = 0.0
+    self._e2e_a_shaped = 0.0
     self.output_should_stop = False
 
     self.v_desired_trajectory = np.zeros(CONTROL_N)
@@ -165,6 +175,17 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
                                                                         action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
+
+    if self.is_e2e(sm):
+      if output_a_target_e2e <= E2E_BRAKE_PASSTHROUGH:
+        self._e2e_a_shaped = output_a_target_e2e
+      elif output_a_target_e2e < self._e2e_a_shaped:
+        self._e2e_a_shaped = max(output_a_target_e2e, self._e2e_a_shaped - E2E_DOWN_JERK * DT_MDL)
+      else:
+        self._e2e_a_shaped = output_a_target_e2e
+      output_a_target_e2e = self._e2e_a_shaped
+    else:
+      self._e2e_a_shaped = 0.0
 
     if self.is_e2e(sm):
       output_a_target = min(output_a_target_e2e, output_a_target_mpc)
