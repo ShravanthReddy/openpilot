@@ -41,6 +41,12 @@ _A_TOTAL_MAX_BP = [20., 40.]
 # already jerk-limited in the car controller).
 E2E_DOWN_JERK = 2.0  # m/s^3
 E2E_BRAKE_PASSTHROUGH = -3.4  # m/s^2
+# Only soften a hard e2e brake onset when radar POSITIVELY confirms ample room:
+# a lead that is both far and slow-closing. Any other case (no radar lead, close
+# lead, or fast closing) keeps the full instant passthrough, so vision-only and
+# genuine emergencies are never delayed.
+AMPLE_ROOM_DIST = 45.0  # m
+AMPLE_ROOM_TTC = 7.0    # s
 
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
@@ -176,8 +182,14 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
+    lead = sm['radarState'].leadOne
+    lead_closing = max(-lead.vRel, 0.1)
+    ample_room = bool(lead.status) and lead.dRel > AMPLE_ROOM_DIST and (lead.dRel / lead_closing) > AMPLE_ROOM_TTC
+
     if self.is_e2e(sm):
-      if output_a_target_e2e <= E2E_BRAKE_PASSTHROUGH:
+      # passthrough hard braking instantly UNLESS radar confirms ample room, in which
+      # case ramp the onset so a distant slowing lead is met gently, not with a stab
+      if output_a_target_e2e <= E2E_BRAKE_PASSTHROUGH and not ample_room:
         self._e2e_a_shaped = output_a_target_e2e
       elif output_a_target_e2e < self._e2e_a_shaped:
         self._e2e_a_shaped = max(output_a_target_e2e, self._e2e_a_shaped - E2E_DOWN_JERK * DT_MDL)
