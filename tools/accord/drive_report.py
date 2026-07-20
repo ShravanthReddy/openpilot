@@ -8,7 +8,7 @@ def dec(p): return zstandard.ZstdDecompressor().stream_reader(open(p,'rb')).read
 from collections import defaultdict
 
 route=sys.argv[1]
-segdirs=sorted(glob.glob('/data/media/0/realdata/%s--*--*'%route),
+segdirs=sorted(glob.glob('/data/media/0/realdata/%s--*'%route),
                key=lambda p:int(p.rsplit('--',1)[1]) if p.rsplit('--',1)[1].isdigit() else -1)
 segdirs=[d for d in segdirs if d.rsplit('--',1)[1].isdigit()]
 nseg=len(segdirs)
