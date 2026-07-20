@@ -15,6 +15,8 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 
 | Commit | Date | Area | Problem → Fix |
 |---|---|---|---|
+| `fae75b5` | 07-20 | Tooling | (no car change) added `tools/accord/drive_report.py` — post-drive feature-behavior report |
+| `d2b4af6` | 07-20 | Longitudinal | Surge/rear-end risk when a lead cuts out → coast gently back to speed (cap reaccel 0.6 m/s² for 2.5 s) |
 | `64d2805` | 07-20 | Speed Limit | SLA could get stranded off → don't release the `pending` state on an unusable limit |
 | `a4a4fb0` | 07-20 | Speed Limit | Hard braking on a limit *drop* (rear-end risk) → coast down gently (0.5 m/s²) instead |
 | `583b63d` | 07-20 | Curve (map) | Phantom highway slowdowns from OSM overpass/interchange artifacts → require camera to confirm the bend |
@@ -37,6 +39,17 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 ---
 
 ## Detailed entries
+
+### `d2b4af6` — Lead-loss coast
+- **Problem:** when the car ahead changes lanes / disappears, the MPC re-accelerates toward cruise and can surge — surprising following traffic (rear-end risk).
+- **Fix:** after a *sustained* lead cuts out, cap re-acceleration to **0.6 m/s²** for 2.5 s so it eases back to speed. Only caps acceleration (never braking); ignores detection flicker (lead must have been present ≥0.7 s); disabled below ~18 mph (normal stop-and-go launches); a new lead cancels it immediately.
+- **Files:** `selfdrive/controls/lib/longitudinal_planner.py`
+- **Verified:** logic tested across sustained-loss / flicker / stop-and-go / new-lead / braking cases (all pass). Always-on (no param). Logic-verified, not road-tested.
+
+### `fae75b5` — drive_report.py tool  *(no car behavior change)*
+- **Problem:** we validated features offline; needed a quick real-drive feedback loop.
+- **Fix:** `tools/accord/drive_report.py` — run parked after a drive to summarize braking-by-cause, closing-assist activations, map-curve / speed-limit braking, lead cut-outs, and learned factors for a route.
+- **Files:** `tools/accord/drive_report.py`
 
 ### `64d2805` — SLA: don't release the `pending` state on an unusable limit  *(bug fix)*
 - **Problem:** Speed Limit Assist could quietly get stuck in the OFF (`inactive`) state and not recover.
