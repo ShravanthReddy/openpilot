@@ -8,17 +8,24 @@ See the LICENSE.md file in the root directory for more details.
 from cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
+from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.sunnypilot.selfdrive.controls.lib.dec.dec import DynamicExperimentalController
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist, LIMIT_MIN_ACC
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist, V_CRUISE_UNSET
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 DecState = custom.LongitudinalPlanSP.DynamicExperimentalControl.DynamicExperimentalControlState
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
+
+# When a speed limit DROPS, ease off the gas and coast down gently rather than braking to the new
+# limit: braking on the highway for a limit change can get you rear-ended by following traffic that
+# doesn't expect the sudden slowdown. This caps how fast the speed-limit target may descend (a
+# coast-like decel). Speed-limit INCREASES are not limited.
+SLA_COAST_DECEL = 0.5  # m/s^2
 
 
 class LongitudinalPlannerSP:
@@ -35,6 +42,7 @@ class LongitudinalPlannerSP:
 
     self.output_v_target = 0.
     self.output_a_target = 0.
+    self._sla_v_target_prev = V_CRUISE_UNSET  # rate-limited (coast-down) speed-limit target
 
   def is_e2e(self, sm: messaging.SubMaster) -> bool:
     experimental_mode = sm['selfdriveState'].experimentalMode
@@ -62,12 +70,17 @@ class LongitudinalPlannerSP:
     self.sla.update(long_enabled, long_override, v_ego, a_ego, v_cruise_cluster, self.resolver.speed_limit,
                     self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp)
 
-    # bound how far below current speed SLA's target may pull per planner horizon:
-    # the MPC/e2e brakes as hard as needed toward the winning v_target, so a
-    # collapsed limit target otherwise turns into an uncapped decel request
+    # Coast down GENTLY for a speed-limit drop instead of braking toward it (the MPC/e2e otherwise
+    # brakes as hard as needed toward the winning v_target). Only the DESCENT is rate-limited to a
+    # coast-like decel; a rising target (limit increase / catching up) passes through unchanged.
     sla_v_target = self.sla.output_v_target
-    if sla_v_target < v_ego:
-      sla_v_target = max(sla_v_target, v_ego + LIMIT_MIN_ACC * 4.0)
+    if sla_v_target >= V_CRUISE_UNSET:
+      # SLA not commanding a target -> pass through, re-anchor the ramp to current speed
+      self._sla_v_target_prev = v_ego
+    else:
+      anchor = min(self._sla_v_target_prev, v_ego)  # ramp from where we were, never above v_ego
+      sla_v_target = max(sla_v_target, anchor - SLA_COAST_DECEL * DT_MDL)
+      self._sla_v_target_prev = sla_v_target
 
     targets = {
       LongitudinalPlanSource.cruise: (v_cruise, a_ego),
