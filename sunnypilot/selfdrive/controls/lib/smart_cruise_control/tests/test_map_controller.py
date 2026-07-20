@@ -55,4 +55,31 @@ class TestSmartCruiseControlMap:
       self.scc_m.update(True, False, 0., 0., 0.)
     assert self.scc_m.state == VisionState.enabled
 
+  def test_vision_corroboration_gates_map_curve(self):
+    # A mapped curve requiring a highway-speed slowdown is only acted on when the camera (model)
+    # also predicts a real bend -- this rejects OSM interchange/overpass artifacts that caused
+    # phantom mid-highway slowdowns.
+    self.scc_m.enabled = True
+    self.scc_m.long_enabled = True
+    self.scc_m.long_override = False
+    self.scc_m.v_ego = 30.0
+    self.scc_m.v_cruise = 30.0
+    self.scc_m.v_target = 20.0
+    self.scc_m.state = MapState.enabled
+
+    # camera sees STRAIGHT road (phantom mapped curve) -> do NOT slow
+    self.scc_m.vision_lat_acc = 0.1
+    self.scc_m._update_state_machine()
+    assert self.scc_m.state == MapState.enabled
+
+    # camera CONFIRMS a real bend -> slow for the curve
+    self.scc_m.vision_lat_acc = 1.2
+    self.scc_m._update_state_machine()
+    assert self.scc_m.state == MapState.turning
+
+    # camera stops seeing the bend mid-slowdown -> abort the slowdown
+    self.scc_m.vision_lat_acc = 0.3
+    self.scc_m._update_state_machine()
+    assert self.scc_m.state == MapState.enabled
+
   # TODO-SP: mock data from modelV2 to test other states

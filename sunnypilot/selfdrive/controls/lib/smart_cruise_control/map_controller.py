@@ -27,6 +27,14 @@ TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you rea
                      # time than specified depending on how much of a speed differential there is between v_ego and the
                      # target velocity.
 
+# Camera (vision) corroboration for mapped curves. OSM curvature data anticipates real curves but
+# also mislabels interchange/overpass geometry on STRAIGHT highway as curves, causing dangerous
+# phantom mid-highway slowdowns (log-verified on this car, Atlanta drive). So a mapped curve is only
+# acted on when the driving model ALSO predicts meaningful lateral acceleration ahead (i.e. the
+# camera sees a real bend within its horizon). Hysteresis: enter at CONFIRM, abort below ABORT.
+VISION_CONFIRM_LAT_ACC = 0.8  # m/s^2 predicted lat-accel required to start slowing for a mapped curve
+VISION_ABORT_LAT_ACC = 0.5    # m/s^2 below this while turning -> camera disagrees, abort the slowdown
+
 
 def velocities_from_param(param: str, params: Params):
   if params is None:
@@ -82,6 +90,7 @@ class SmartCruiseControlMap:
     self.v_cruise = 0
     self.target_lat = 0.0
     self.target_lon = 0.0
+    self.vision_lat_acc = 0.0  # model's predicted max lateral accel ahead (camera curve corroboration)
     self.frame = -1
 
     self.last_position = coordinate_from_param("LastGPSPosition", self.mem_params) or Coordinate(0.0, 0.0)
@@ -214,21 +223,23 @@ class SmartCruiseControlMap:
       else:
         # ENABLED
         if self.state == MapState.enabled:
-          # only take control at highway speeds: map curvature data anticipates
-          # ramps/curves vision can't see yet, but below ~45mph its intersection
-          # geometry artifacts cause phantom slowdowns (log-verified on this car)
-          if self.v_ego > 20.0 and self.v_cruise > self.v_target != 0:
+          # only take control at highway speeds AND when the camera corroborates a real bend:
+          # map curvature anticipates ramps/curves, but its interchange/overpass geometry
+          # artifacts cause phantom slowdowns on straight highway (log-verified on this car), so
+          # require the model to also predict lateral acceleration ahead before slowing.
+          if self.v_ego > 20.0 and self.v_cruise > self.v_target != 0 and self.vision_lat_acc >= VISION_CONFIRM_LAT_ACC:
             self.state = MapState.turning
 
         # TURNING
         elif self.state == MapState.turning:
-          if self.v_cruise <= self.v_target or self.v_target == 0:
+          # abort if the target is reached OR the camera stops seeing a bend (mapped phantom curve)
+          if self.v_cruise <= self.v_target or self.v_target == 0 or self.vision_lat_acc < VISION_ABORT_LAT_ACC:
             self.state = MapState.enabled
 
         # OVERRIDING
         elif self.state == MapState.overriding:
           if not self.long_override:
-            if self.v_cruise > self.v_target != 0:
+            if self.v_cruise > self.v_target != 0 and self.vision_lat_acc >= VISION_CONFIRM_LAT_ACC:
               self.state = MapState.turning
             else:
               self.state = MapState.enabled
@@ -246,12 +257,13 @@ class SmartCruiseControlMap:
 
     return enabled, active
 
-  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise) -> None:
+  def update(self, long_enabled: bool, long_override: bool, v_ego, a_ego, v_cruise, vision_lat_acc: float = 0.0) -> None:
     self.long_enabled = long_enabled
     self.long_override = long_override
     self.v_ego = v_ego
     self.a_ego = a_ego
     self.v_cruise = v_cruise
+    self.vision_lat_acc = vision_lat_acc
 
     self.update_params()
     self.update_calculations()
