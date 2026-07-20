@@ -14,6 +14,8 @@ from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDX
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.params import Params
+from openpilot.selfdrive.controls.lib.closing_assist import ClosingAssist
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
 
@@ -83,6 +85,12 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.output_a_target = 0.0
     self._e2e_a_shaped = 0.0
     self.output_should_stop = False
+
+    # Closing-rate assist (radar-disabled vision-long). DEFAULT OFF: shadow-logs unless the
+    # "ClosingAssistEnabled" param is set, then applies a gentle jerk-limited decel floor.
+    self.closing_assist = ClosingAssist()
+    self.closing_assist_enabled = Params().get_bool("ClosingAssistEnabled")
+    self._ca_log_ctr = 0
 
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
@@ -207,6 +215,24 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     else:
       output_a_target = output_a_target_mpc
       self.output_should_stop = output_should_stop_mpc
+
+    # Closing-rate assist: gentle, jerk-limited decel floor to counter the model's under-reported
+    # lead closing (radar-disabled). Shadow-logs its request; only actuates when enabled. Applied
+    # before clipping so the accel_clip/jerk limits still bound the result.
+    ca_lead = sm['radarState'].leadOne
+    ca_t = sm.logMonoTime['radarState'] / 1e9
+    ca_prob = ca_lead.modelProb if ca_lead.status else 0.0
+    ca_extra = self.closing_assist.update(ca_t, ca_lead.dRel, ca_prob, ca_lead.vRel)
+    if self.closing_assist_enabled:
+      # Subtract the bounded, jerk-limited extra decel, faded out as the MPC's own braking grows
+      # (smooth, no discontinuity, no double-count). accel_clip below still bounds the result.
+      ca_fade = max(0.0, min(1.0, 1.0 - max(0.0, -output_a_target) / 1.0))
+      output_a_target = output_a_target - ca_extra * ca_fade
+    self._ca_log_ctr += 1
+    if ca_extra > 0.05 and self._ca_log_ctr % 25 == 0:
+      cloudlog.info("closing_assist extra_decel=%.2f trend=%.1f r2=%.2f dRel=%.0f vRel=%.1f applied=%s" %
+                    (ca_extra, self.closing_assist.trend, self.closing_assist.r2, ca_lead.dRel,
+                     ca_lead.vRel, self.closing_assist_enabled))
 
     for idx in range(2):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
