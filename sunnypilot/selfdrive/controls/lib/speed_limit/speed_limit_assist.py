@@ -260,8 +260,11 @@ class SpeedLimitAssist:
       else:
         # release control if the limit reading has been unusable for ~1s: steering
         # toward a stale or zeroed limit value causes phantom braking
+        # only release states that actively steer toward the limit; 'pending' is the legitimate
+        # "enabled, no limit yet, waiting" state (it steers toward nothing, so it can't phantom-brake)
+        # and must not be kicked to inactive just because there is no usable limit.
         if self.invalid_limit_frames > int(1.0 / DT_MDL) and \
-           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending):
+           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive):
           self.state = SpeedLimitAssistState.inactive
 
         # ACTIVE
@@ -337,8 +340,11 @@ class SpeedLimitAssist:
       else:
         # release control if the limit reading has been unusable for ~1s: steering
         # toward a stale or zeroed limit value causes phantom braking
+        # only release states that actively steer toward the limit; 'pending' is the legitimate
+        # "enabled, no limit yet, waiting" state (it steers toward nothing, so it can't phantom-brake)
+        # and must not be kicked to inactive just because there is no usable limit.
         if self.invalid_limit_frames > int(1.0 / DT_MDL) and \
-           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive, SpeedLimitAssistState.pending):
+           self.state in (SpeedLimitAssistState.active, SpeedLimitAssistState.adapting, SpeedLimitAssistState.preActive):
           self.state = SpeedLimitAssistState.inactive
 
         # ACTIVE
