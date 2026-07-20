@@ -15,6 +15,7 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 
 | Commit | Date | Area | Problem → Fix |
 |---|---|---|---|
+| `8d80d2d`* | 07-20 | Car control (upstream) | Merged MVL's 4 Bosch CAN-FD longitudinal commits: **actuator delay 0.5→0.05 s** (CAN-FD has stock feedforward — big responsiveness fix), brake_pid limited to <3 m/s, radarless brake actuator faster. *(opendbc; openpilot submodule repointed)* |
 | `fae75b5` | 07-20 | Tooling | (no car change) added `tools/accord/drive_report.py` — post-drive feature-behavior report |
 | `d2b4af6` | 07-20 | Longitudinal | Surge/rear-end risk when a lead cuts out → coast gently back to speed (cap reaccel 0.6 m/s² for 2.5 s) |
 | `64d2805` | 07-20 | Speed Limit | SLA could get stranded off → don't release the `pending` state on an unusable limit |
@@ -39,6 +40,16 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 ---
 
 ## Detailed entries
+
+### `8d80d2d` (opendbc) — Merge MVL's Bosch CAN-FD longitudinal update  *(upstream sync)*
+- **What:** first upstream sync since we forked (June base). MVL's `sp-honda-dev-202606` advanced only by an opendbc submodule bump = 4 Honda Bosch CAN-FD commits, cherry-picked onto our opendbc branch:
+  - `3d64171` **longitudinalActuatorDelay 0.5 → 0.05 s for HONDA_BOSCH_CANFD** — MVL found CAN-FD Accords have near-zero real actuator lag (stock feedforward correction). Our car had been planning around a 0.5 s delay that isn't there → over-anticipation/overshoot; likely root cause behind late-then-hard braking and the follow-distance oscillation.
+  - `ea99d17` limit brake_pid augmentation to below 3 m/s (Bosch) — reduces extra braking at speed.
+  - `3dadfb3` radarless brake actuator treated as faster.
+  - `6303fd8` whitespace.
+- **Conflict resolved:** `ea99d17` touched the same brake_pid block as our PID-deadband edit (`01858b1`). Kept MVL's `1e-3 < vEgo < 3.0` gate wrapping our deadband; our brake-release jerk-limit below is unchanged.
+- **Files:** `opendbc/car/honda/interface.py`, `opendbc/car/honda/carcontroller.py`; openpilot `opendbc_repo` submodule repointed `01858b1 → 8d80d2d`.
+- **Verified:** py_compile OK; on-device `test_car_interfaces` for ACCORD_11G after rebuild. **Live controller change — road-test supervised** (feel for smoother, better-timed braking).
 
 ### `d2b4af6` — Lead-loss coast
 - **Problem:** when the car ahead changes lanes / disappears, the MPC re-accelerates toward cruise and can surge — surprising following traffic (rear-end risk).
