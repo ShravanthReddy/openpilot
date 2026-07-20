@@ -50,6 +50,14 @@ E2E_BRAKE_PASSTHROUGH = -3.4  # m/s^2
 AMPLE_ROOM_DIST = 45.0  # m
 AMPLE_ROOM_TTC = 7.0    # s
 
+# Lead-loss coast: after a sustained lead cuts out, cap re-acceleration briefly so the car eases
+# back to speed instead of surging (rear-end risk). Only above LEAD_LOSS_MIN_SPEED so stop-and-go
+# launches are unaffected.
+LEAD_LOSS_ACCEL_CAP = 0.6    # m/s^2 gentle reaccel cap during the coast window
+LEAD_LOSS_COAST_T = 2.5      # s   coast window after a lead cuts out
+LEAD_PRESENT_MIN_T = 0.7     # s   lead must have been present this long (ignore detection flicker)
+LEAD_LOSS_MIN_SPEED = 8.0    # m/s only coast above ~18 mph
+
 def get_max_accel(v_ego):
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
 
@@ -91,6 +99,11 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.closing_assist = ClosingAssist()
     self.closing_assist_enabled = Params().get_bool("ClosingAssistEnabled")
     self._ca_log_ctr = 0
+
+    # Lead-loss coast: after a confidently-present lead cuts out (lane change / disappears), ease
+    # back to speed gently instead of surging -- a sudden reaccel can surprise following traffic.
+    self._lead_present_frames = 0
+    self._lead_loss_coast_frames = 0
 
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
@@ -233,6 +246,21 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       cloudlog.info("closing_assist extra_decel=%.2f trend=%.1f r2=%.2f dRel=%.0f vRel=%.1f applied=%s" %
                     (ca_extra, self.closing_assist.trend, self.closing_assist.r2, ca_lead.dRel,
                      ca_lead.vRel, self.closing_assist_enabled))
+
+    # Lead-loss coast: after a sustained lead cuts out, cap re-acceleration briefly so we ease back
+    # to speed instead of surging. Only caps ACCELERATION (never affects braking); ignores detection
+    # flicker (lead must have been present LEAD_PRESENT_MIN_T); off in stop-and-go (< min speed).
+    if ca_lead.status and ca_prob > 0.5:
+      self._lead_present_frames += 1
+      self._lead_loss_coast_frames = 0            # following a lead -> no coast
+    else:
+      if self._lead_present_frames >= int(LEAD_PRESENT_MIN_T / DT_MDL):
+        self._lead_loss_coast_frames = int(LEAD_LOSS_COAST_T / DT_MDL)   # a real lead just cut out
+      self._lead_present_frames = 0
+    if self._lead_loss_coast_frames > 0:
+      self._lead_loss_coast_frames -= 1
+      if v_ego > LEAD_LOSS_MIN_SPEED:
+        output_a_target = min(output_a_target, LEAD_LOSS_ACCEL_CAP)
 
     for idx in range(2):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
