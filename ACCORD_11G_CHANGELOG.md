@@ -15,6 +15,7 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 
 | Commit | Date | Area | Problem → Fix |
 |---|---|---|---|
+| `c23ed1f`* | 07-25 | Instrument cluster | Comma longitudinal disabled the stock radar frames that draw lanes/traffic → recreate the exact Accord CAN-FD display protocol from captured stock traffic (default OFF) |
 | `8d80d2d`* | 07-20 | Car control (upstream) | Merged MVL's 4 Bosch CAN-FD longitudinal commits: **actuator delay 0.5→0.05 s** (CAN-FD has stock feedforward — big responsiveness fix), brake_pid limited to <3 m/s, radarless brake actuator faster. *(opendbc; openpilot submodule repointed)* |
 | `fae75b5` | 07-20 | Tooling | (no car change) added `tools/accord/drive_report.py` — post-drive feature-behavior report |
 | `d2b4af6` | 07-20 | Longitudinal | Surge/rear-end risk when a lead cuts out → coast gently back to speed (cap reaccel 0.6 m/s² for 2.5 s) |
@@ -40,6 +41,14 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 ---
 
 ## Detailed entries
+
+### `c23ed1f` (opendbc) — Restore Accord 11G cluster lanes and lead visualization
+- **Problem:** with openpilot longitudinal enabled, the center instrument-cluster scene lost the stock lane path and detected vehicles.
+- **Root cause:** tester-present intentionally disables the Bosch radar. On this Accord the radar is also the source of six CAN-FD display messages (`RADAR_HUD_CANFD`, `LANE_PATH`, `HUD_OBJECTS`, `RADAR_LEAD`, `RADAR_LEAD2`, and a supplemental frame), and openpilot did not recreate them. The existing `lanesVisible` / `leadVisible` HUD state cannot replace that protocol.
+- **Fix:** reconstruct the stock message definitions, checksum variant, counters, mux cycle, cadences, idle sentinel, active path length, LKAS transition pulse, and lead-object encoding from exact captures from this car. Feed fresh `modelV2` lanes/primary lead to the Honda controller; fail blank on stale or invalid model data. Author the new frames on powertrain bus 0 only.
+- **Safety:** exact-car + openpilot-longitudinal + `AccordClusterVisualization` development param gate; the param defaults **OFF**. Panda safety permits only the six exact IDs, only on bus 0, and only at 8 bytes in Honda CAN-FD-long mode. No DTC clearing and no camera-bus transmission. This restores display data only; it does **not** restore stock CMBS/AEB/FCW while the radar is disabled.
+- **Files:** opendbc Honda controller/state/CAN helpers, CAN-FD DBC, Honda safety allowlist/tests, checksum/path/object tests; openpilot `card.py`, params registry, and submodule pointer.
+- **Verified:** 981 focused Honda/opendbc tests pass (69 expected skips), ruff clean, exact stock checksum vectors pass, independent Codex review and Claude Fable review both conditionally pass. Must still pass the on-device build/param-off replay and a parked param-on cluster canary before supervised driving.
 
 ### `8d80d2d` (opendbc) — Merge MVL's Bosch CAN-FD longitudinal update  *(upstream sync)*
 - **What:** first upstream sync since we forked (June base). MVL's `sp-honda-dev-202606` advanced only by an opendbc submodule bump = 4 Honda Bosch CAN-FD commits, cherry-picked onto our opendbc branch:
