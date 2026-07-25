@@ -15,6 +15,7 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 
 | Commit | Date | Area | Problem → Fix |
 |---|---|---|---|
+| `e7512cc`* | 07-25 | Instrument cluster validation | Audited the apparent `CAR_TYPE` mismatch across all stock cold starts; confirmed `+7=car` and `-7=truck`, then locked the semantics into the DBC/tests |
 | `c23ed1f`* | 07-25 | Instrument cluster | Comma longitudinal disabled the stock radar frames that draw lanes/traffic → recreate the exact Accord CAN-FD display protocol from captured stock traffic (default OFF) |
 | `8d80d2d`* | 07-20 | Car control (upstream) | Merged MVL's 4 Bosch CAN-FD longitudinal commits: **actuator delay 0.5→0.05 s** (CAN-FD has stock feedforward — big responsiveness fix), brake_pid limited to <3 m/s, radarless brake actuator faster. *(opendbc; openpilot submodule repointed)* |
 | `fae75b5` | 07-20 | Tooling | (no car change) added `tools/accord/drive_report.py` — post-drive feature-behavior report |
@@ -41,6 +42,12 @@ and the **fix**. Newest first. Keep this updated whenever a new commit lands (te
 ---
 
 ## Detailed entries
+
+### `e7512cc` (opendbc) — Audit and lock down HUD object classification
+- **Concern:** the only captured active stock object used `CAR_TYPE=-7` and `OBJECT_ID=4`, while the authored generic primary lead used `CAR_TYPE=+7` and stable ID `1`.
+- **Audit:** scanned all 37 exact-car cold-start logs: 15,311 bus-0 `HUD_OBJECTS` frames, including 40 active frames from one continuous ID-4 track. Honda's enum is `+7=car`, `+6=motorcycle`, `-7=truck`, `-1=inactive`, `0=unknown`; synchronized road-camera video confirms the active stock track was a semi-truck. `OBJECT_ID` is tracking identity, so stable nonzero ID `1` is correct for a primary-lead-only author.
+- **Resolution:** preserve the functional encoding, document the enum in the CAN-FD DBC/source, and add round-trip assertions for the stock truck, authored car, and complete inactive sentinel.
+- **Verified:** clean focused/full suite remains 981 passed with 69 expected skips; ruff clean. Independent Codex and Claude Fable reviewers both pass with no code blocker. Parked cluster rendering remains the activation gate.
 
 ### `c23ed1f` (opendbc) — Restore Accord 11G cluster lanes and lead visualization
 - **Problem:** with openpilot longitudinal enabled, the center instrument-cluster scene lost the stock lane path and detected vehicles.
