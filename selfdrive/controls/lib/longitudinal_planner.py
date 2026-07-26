@@ -16,6 +16,8 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 from openpilot.selfdrive.controls.lib.closing_assist import ClosingAssist
+from openpilot.selfdrive.controls.lib.early_lead_decel import EarlyLeadDecel
+from opendbc.car.honda.values import CAR
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
 
@@ -99,6 +101,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.closing_assist = ClosingAssist()
     self.closing_assist_enabled = Params().get_bool("ClosingAssistEnabled")
     self._ca_log_ctr = 0
+    self.early_lead_decel = EarlyLeadDecel(self.dt)
+    self.early_lead_decel_enabled = Params().get_bool("EarlyLeadDecelEnabled")
+    self._early_decel_log_ctr = 0
 
     # Lead-loss coast: after a confidently-present lead cuts out (lane change / disappears), ease
     # back to speed gently instead of surging -- a sudden reaccel can surprise following traffic.
@@ -228,6 +233,31 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     else:
       output_a_target = output_a_target_mpc
       self.output_should_stop = output_should_stop_mpc
+
+    # In radarless ACC, DEC may take a short time to switch to blended even when
+    # a stable slowing lead and the model already agree that a mild slowdown is
+    # needed. Shadow-compute a bounded, debounced acceleration cap for the exact
+    # Accord 11G. Harder MPC/e2e braking always passes through unchanged.
+    early_lead = sm['radarState'].leadOne
+    early_model_accel = sm['modelV2'].action.desiredAcceleration
+    early_system_active = (self.CP.carFingerprint == CAR.HONDA_ACCORD_11G and
+                           self.CP.radarUnavailable and self.CP.openpilotLongitudinalControl and
+                           not reset_state)
+    early_driver_override = (sm['carState'].gasPressed or sm['carState'].brakePressed or
+                             sm['carControl'].cruiseControl.override)
+    early_output = self.early_lead_decel.update(
+      output_a_target, early_system_active, not self.is_e2e(sm), v_ego,
+      early_lead.status, early_lead.modelProb if early_lead.status else 0.0,
+      early_lead.dRel, early_lead.vRel, early_lead.aLeadK, early_model_accel,
+      early_driver_override,
+    )
+    if self.early_lead_decel_enabled:
+      output_a_target = early_output
+    self._early_decel_log_ctr += 1
+    if self.early_lead_decel.active and self._early_decel_log_ctr % 25 == 0:
+      cloudlog.info("early_lead_decel cap=%.2f base=%.2f model=%.2f dRel=%.0f vRel=%.1f applied=%s" %
+                    (self.early_lead_decel.cap, output_a_target, early_model_accel,
+                     early_lead.dRel, early_lead.vRel, self.early_lead_decel_enabled))
 
     # Closing-rate assist: gentle, jerk-limited decel floor to counter the model's under-reported
     # lead closing (radar-disabled). Shadow-logs its request; only actuates when enabled. Applied
