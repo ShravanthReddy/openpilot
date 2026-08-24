@@ -5,6 +5,7 @@ import numpy as np
 import openpilot.cereal.messaging as messaging
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
@@ -29,14 +30,20 @@ MIN_ALLOW_THROTTLE_SPEED = 2.5
 _A_TOTAL_MAX_V = [1.7, 3.2]
 _A_TOTAL_MAX_BP = [20., 40.]
 
-def get_max_accel(v_ego):
-  return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
+def get_max_accel(v_ego, peak_override=0.0):
+  # peak_override (MaxCruiseAccel param): rescale the curve so its low-speed peak equals the
+  # override, preserving the taper with speed. 0 = stock.
+  vals = A_CRUISE_MAX_VALS
+  if peak_override > 0.0:
+    scale = peak_override / A_CRUISE_MAX_VALS[0]
+    vals = [v * scale for v in A_CRUISE_MAX_VALS]
+  return np.interp(v_ego, A_CRUISE_MAX_BP, vals)
 
 def get_coast_accel(pitch):
   return np.sin(pitch) * -5.65 - 0.3  # fitted from data using xx/projects/allow_throttle/compute_coast_accel.py
 
-def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, accel_coast, allow_throttle):
-  max_accel = ACCEL_MAX if e2e else get_max_accel(v_ego)
+def get_cruise_accel(e2e, v_cruise, v_ego, a_cruise_prev, angle_steers, CP, dt, accel_coast, allow_throttle, max_cruise_peak=0.0):
+  max_accel = ACCEL_MAX if e2e else get_max_accel(v_ego, max_cruise_peak)
 
   if not e2e:
     a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
@@ -72,6 +79,38 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
+
+    # Accord tuning stack (ported to the rewritten planner):
+    # E2eSpeedBias: hold set speed in full-e2e; fades by raw=-0.15, suppressed after 1.5s of
+    #   sustained gentle decel (red-light approach), capped at set speed by the cruise candidate.
+    # StopCommitGain: amplify committed no-lead stops (empty red lights); never creates braking.
+    # MaxCruiseAccel: peak override for the non-e2e cruise accel curve.
+    self._param_reader = Params()
+    self.e2e_speed_bias = 0.0
+    self.max_cruise_accel = 0.0
+    self.stop_commit_gain = 0.0
+    self._bias_read_ctr = 0
+    self._bias_decel_frames = 0
+    self._sca_commit_frames = 0
+    self._sca_extra = 0.0
+    self._read_tuning_params()
+
+  def _read_tuning_params(self):
+    try:
+      v = self._param_reader.get("E2eSpeedBias")
+      self.e2e_speed_bias = float(np.clip(float(v), 0.0, 0.3)) if v is not None else 0.0
+    except (TypeError, ValueError):
+      self.e2e_speed_bias = 0.0
+    try:
+      m = self._param_reader.get("MaxCruiseAccel")
+      self.max_cruise_accel = float(np.clip(float(m), 1.2, 2.0)) if m is not None and float(m) > 0.0 else 0.0
+    except (TypeError, ValueError):
+      self.max_cruise_accel = 0.0
+    try:
+      g = self._param_reader.get("StopCommitGain")
+      self.stop_commit_gain = float(np.clip(float(g), 1.0, 1.5)) if g is not None and float(g) > 1.0 else 0.0
+    except (TypeError, ValueError):
+      self.stop_commit_gain = 0.0
 
   def update(self, sm):
     LongitudinalPlannerSP.update(self, sm)
@@ -140,9 +179,36 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
     is_e2e = self.is_e2e(sm)
 
+    raw_e2e = output_a_target_e2e
+    self._bias_read_ctr += 1
+    if self._bias_read_ctr % 100 == 0:  # ~5s: live tuning without restart
+      self._read_tuning_params()
+    if self.e2e_speed_bias > 0.0 and is_e2e and not output_should_stop_e2e:
+      if raw_e2e < -0.02:
+        self._bias_decel_frames += 1
+      elif raw_e2e > 0.05:
+        self._bias_decel_frames = 0
+      if self._bias_decel_frames < 30:
+        fade = float(np.clip(1.0 + raw_e2e / 0.15, 0.0, 1.0))
+        output_a_target_e2e += self.e2e_speed_bias * fade
+
+    lead_present = sm['radarState'].leadOne.present
+    if self.stop_commit_gain > 0.0 and is_e2e and not lead_present and raw_e2e <= -1.0:
+      self._sca_commit_frames += 1
+    else:
+      self._sca_commit_frames = 0
+    extra_target = 0.0
+    if self._sca_commit_frames >= 20 and raw_e2e < -0.5 and v_ego / max(-raw_e2e, 0.1) <= 6.0:
+      extra_target = (self.stop_commit_gain - 1.0) * (-raw_e2e)
+      extra_target = min(extra_target, max(0.0, 3.0 + raw_e2e))
+      extra_target *= float(np.clip((v_ego - 1.5) / 3.5, 0.0, 1.0))
+    self._sca_extra = float(np.clip(extra_target, self._sca_extra - 3.0 * DT_MDL, self._sca_extra + 1.5 * DT_MDL))
+    if self._sca_extra > 0.001:
+      output_a_target_e2e -= self._sca_extra
+
     self.a_cruise = get_cruise_accel(is_e2e, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
-                                     accel_coast, self.allow_throttle)
+                                     accel_coast, self.allow_throttle, self.max_cruise_accel)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),

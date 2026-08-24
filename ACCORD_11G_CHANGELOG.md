@@ -3,6 +3,16 @@
 Running record of every change we made on top of MVL's fork: the **problem**, the **root cause**,
 and the **fix**. Newest first. Keep this updated whenever a new commit lands (template at bottom).
 
+### (dev) Upstream sync #3 (Aug 24) — right-veer fix base + feature PORT
+- MVL picked up sunnypilot's fix for the 8/22 dev regression (all models veering right toward
+  the divider; RL-family models needed RECOMPILED bundles — re-download the model after update).
+- The new base REWROTE the longitudinal planner (cruise-accel candidate architecture, lead-only
+  MPC, should_stop helper, service renames). Our three features were PORTED, not rebased:
+  E2eSpeedBias (+gate), StopCommitGain assist, MaxCruiseAccel (now affects non-e2e cruise only —
+  in e2e the new base uses ACCEL_MAX for the cruise candidate). Trajectory-init fix now moot
+  (upstream initializes correctly). All original validation sims re-run and passing.
+- Also gained: chestnut-model support, camera-offset scripts, vibration tolerance.
+
 ### (dev) Upstream sync #2 (Aug 17) — MVL dev-202608 refresh + LaneCentering
 - Rebased our stack (2 opendbc patches + 5 openpilot commits) onto MVL's new heads.
 - **Gained: confidence-gated LaneCentering** (StarPilot port; params `LaneCentering` BOOL /
