@@ -3,6 +3,19 @@
 Running record of every change we made on top of MVL's fork: the **problem**, the **root cause**,
 and the **fix**. Newest first. Keep this updated whenever a new commit lands (template at bottom).
 
+### (dev) Upstream sync #4 (Sep 17) — MVL Sept-16 branch refresh (120 commits)
+- **What**: MVL force-refreshed sp-honda-dev-202608 on Sept 16 (no 202609 branch exists; the
+  monthly branch was refreshed in place). Rebased both our repos onto it.
+- **Notable upstream**: AGNOS 19.7; modeld_v2 rework (spatial features, one-dev warp, npy->amd);
+  branch-switcher UI; camera-offset up/down scripts (scripts/plus.sh / minus.sh, 0.01 m steps);
+  LaneCenteringPauseOnSignal param; big Honda opendbc rework (carcontroller +889 lines: brake PID
+  restore, stopping brake ramp = hardcoded 0.1 m/s^2/s step, radarless lane-path gain restored
+  w/ CAN-FD curvature fix kept, gasalpha learner added, min_gas deadband removed from gas learner).
+- **Ours re-applied**: opendbc 24a37aba (learn_speed=300 for ACCORD_11G re-inserted into the new
+  learner structure + boot sanity band unchanged); openpilot planner port cherry-picked clean —
+  longitudinal_planner.py byte-identical to validated b042afc89; params_keys conflict resolved
+  keeping our 3 keys alongside MVL's new Honda param block. CameraOffset wiring verified intact.
+
 ### (dev) Upstream sync #3 (Aug 24) — right-veer fix base + feature PORT
 - MVL picked up sunnypilot's fix for the 8/22 dev regression (all models veering right toward
   the divider; RL-family models needed RECOMPILED bundles — re-download the model after update).
