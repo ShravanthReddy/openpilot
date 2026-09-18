@@ -3,6 +3,18 @@
 Running record of every change we made on top of MVL's fork: the **problem**, the **root cause**,
 and the **fix**. Newest first. Keep this updated whenever a new commit lands (template at bottom).
 
+### (dev) Gap-proportional speed bias (Sep 17)
+- **Problem**: two complaints from the 42-min drive on routes 0x127-0x129 (old code, flat bias
+  0.13): (a) 226 s spent >6 mph below the set speed (plan mean only +0.13 m/s2); (b) annoying
+  downhill idle<->regen cycling. Log trace (0x128 t=1738) proved the cycling is a limit cycle
+  DRIVEN by the flat bias: model wants a ~0 downhill hold, bias pushes +0.13, model compensates,
+  decel gate cuts bias, hybrid regen overshoots the plan (aEgo -0.61 vs plan -0.40), speed sags
+  4 mph, bias returns; ~7 s period.
+- **Fix**: scale the bias by clip((v_cruise - v_ego)/2, 0, 1) - full bias when >=2 m/s below the
+  SCC/SLA-adjusted set speed, zero at it. Param raised 0.13 -> 0.18. Replay over the same drive:
+  catch-up push +0.155 m/s2 (vs +0.156 flat 0.18 - nothing lost), max bias at zero gap 0.004
+  (vs 0.13 before - nothing left to cycle). All other gates unchanged; bias can only shrink.
+
 ### (dev) Upstream sync #4 (Sep 17) — MVL Sept-16 branch refresh (120 commits)
 - **What**: MVL force-refreshed sp-honda-dev-202608 on Sept 16 (no 202609 branch exists; the
   monthly branch was refreshed in place). Rebased both our repos onto it.

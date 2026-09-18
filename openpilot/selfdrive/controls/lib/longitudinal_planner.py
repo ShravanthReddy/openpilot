@@ -190,7 +190,12 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
         self._bias_decel_frames = 0
       if self._bias_decel_frames < 30:
         fade = float(np.clip(1.0 + raw_e2e / 0.15, 0.0, 1.0))
-        output_a_target_e2e += self.e2e_speed_bias * fade
+        # gap-proportional: full bias only when >=2 m/s below the (SCC/SLA-adjusted) set speed,
+        # fading to zero at it. A constant bias at the set speed turns a downhill hold into a
+        # limit cycle on the hybrid (bias on -> overspeed -> model decel -> gate cuts bias ->
+        # regen bites -> speed sags -> bias returns); at zero gap there is nothing to toggle.
+        gap_scale = float(np.clip((v_cruise - v_ego) / 2.0, 0.0, 1.0))
+        output_a_target_e2e += self.e2e_speed_bias * fade * gap_scale
 
     lead_present = sm['radarState'].leadOne.present
     if self.stop_commit_gain > 0.0 and is_e2e and not lead_present and raw_e2e <= -1.0:
